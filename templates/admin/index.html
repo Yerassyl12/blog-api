@@ -1,0 +1,51 @@
+{% extends "admin/base.html" %}
+
+{% load i18n unfold %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:_("Django site admin") }}{% endblock %}
+
+{% block branding %}
+    {% include "unfold/helpers/site_branding.html" %}
+{% endblock %}
+
+{% block content %}
+    {% component "unfold/components/container.html" %}
+        {# 1. Cards #}
+        <div class="grid gap-6 mb-8 md:grid-cols-2 xl:grid-cols-4">
+            {% for card in cards %}
+                {% component "unfold/components/card.html" with icon=card.icon %}
+                    {% component "unfold/components/text.html" %}{{ card.title }}{% endcomponent %}
+                    {% component "unfold/components/title.html" %}{{ card.value }}{% endcomponent %}
+                {% endcomponent %}
+            {% endfor %}
+        </div>
+
+        <div class="grid gap-6 mb-8 xl:grid-cols-3">
+            {# 2. Bar chart: posts per category #}
+            <div class="xl:col-span-2">
+                {% trans "Posts per category" as chart_title %}
+                {% component "unfold/components/card.html" with title=chart_title %}
+                    {% component "unfold/components/chart/bar.html" with data=posts_per_category_chart height=320 %}{% endcomponent %}
+                {% endcomponent %}
+            </div>
+
+            {# 4. Progress: published vs drafts #}
+            <div>
+                {% trans "Published vs drafts" as progress_title %}
+                {% component "unfold/components/card.html" with title=progress_title %}
+                    <div class="flex flex-col gap-6">
+                        {% for item in progress %}
+                            {% component "unfold/components/progress.html" with title=item.title description=item.description value=item.value %}{% endcomponent %}
+                        {% endfor %}
+                    </div>
+                {% endcomponent %}
+            </div>
+        </div>
+
+        {# 3. Table: top 5 authors #}
+        {% trans "Top 5 authors" as table_title %}
+        {% component "unfold/components/card.html" with title=table_title %}
+            {% component "unfold/components/table.html" with table=top_authors_table card_included=1 striped=1 %}{% endcomponent %}
+        {% endcomponent %}
+    {% endcomponent %}
+{% endblock %}

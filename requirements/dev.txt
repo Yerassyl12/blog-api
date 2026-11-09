@@ -1,3 +1,4 @@
 -r base.txt
 
+faker==40.44.0
 ruff==0.17.4
