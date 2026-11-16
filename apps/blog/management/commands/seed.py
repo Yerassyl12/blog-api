@@ -1,5 +1,6 @@
 import random
 import time
+from datetime import datetime, timedelta
 from typing import Any
 
 from faker import Faker
@@ -7,6 +8,7 @@ from faker import Faker
 from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
+from django.utils import timezone
 from django.utils.text import slugify
 
 from apps.auths.models import User
@@ -38,6 +40,12 @@ FIRST_DUPLICATE_SUFFIX = 2
 # ---- comments ---------------------------------------------------------------
 MIN_COMMENT_SENTENCES = 1
 MAX_COMMENT_SENTENCES = 3
+
+# ---- dates ------------------------------------------------------------------
+DATE_RANGE_DAYS = 365
+EDITED_POSTS_RATIO = 0.3
+MIN_EDIT_DELAY_DAYS = 1
+MAX_EDIT_DELAY_DAYS = 30
 
 # ---- names ------------------------------------------------------------------
 CATEGORY_NAMES = [
@@ -130,8 +138,9 @@ class Command(BaseCommand):
             users_created = self._create_users(users_count)
             categories_created = self._create_categories()
             tags_created = self._create_tags()
-            posts_created = self._create_posts(posts_count)
-            comments_created = self._create_comments(comments_count)
+            posts = self._create_posts(posts_count)
+            posts_created = len(posts)
+            comments_created = self._create_comments(comments_count, posts)
 
         elapsed = time.perf_counter() - started
 
@@ -220,9 +229,33 @@ class Command(BaseCommand):
         used_slugs.add(slug)
         return slug
 
-    def _create_posts(self, count: int) -> int:
+    def _random_datetime_between(self, start: datetime, end: datetime) -> datetime:
+        """Return a random moment from start to end."""
+        seconds = max(int((end - start).total_seconds()), 0)
+        return start + timedelta(seconds=random.randint(0, seconds))
+
+    def _set_post_dates(self, posts: list[Post]) -> None:
+        """Spread posts over the last year; about 30% of them are edited later."""
+        now = timezone.now()
+        year_ago = now - timedelta(days=DATE_RANGE_DAYS)
+
+        for post in posts:
+            post.created_at = self._random_datetime_between(year_ago, now)
+            if random.random() < EDITED_POSTS_RATIO:
+                delay = timedelta(
+                    days=random.randint(MIN_EDIT_DELAY_DAYS, MAX_EDIT_DELAY_DAYS)
+                )
+                post.updated_at = min(post.created_at + delay, now)
+            else:
+                post.updated_at = post.created_at
+
+        Post.objects.bulk_update(
+            posts, ["created_at", "updated_at"], batch_size=BATCH_SIZE
+        )
+
+    def _create_posts(self, count: int) -> list[Post]:
         if not count:
-            return 0
+            return []
 
         author_ids = list(User.objects.values_list("id", flat=True))
         if not author_ids:
@@ -265,9 +298,10 @@ class Command(BaseCommand):
                 random.sample(tags, random.randint(MIN_TAGS_PER_POST, max_tags))
             )
 
-        return len(created)
+        self._set_post_dates(created)
+        return created
 
-    def _create_comments(self, count: int) -> int:
+    def _create_comments(self, count: int, new_posts: list[Post]) -> int:
         """Create comments on published posts only."""
         if not count:
             return 0
@@ -278,19 +312,24 @@ class Command(BaseCommand):
                 "Cannot create comments: there are no users. Use --users N."
             )
 
-        post_ids = list(
-            Post.objects.filter(status=Post.Status.PUBLISHED).values_list(
-                "id", flat=True
+        published_posts = [
+            post for post in new_posts if post.status == Post.Status.PUBLISHED
+        ]
+        if not published_posts:
+            published_posts = list(
+                Post.objects.filter(status=Post.Status.PUBLISHED).only(
+                    "id", "created_at"
+                )
             )
-        )
-        if not post_ids:
+
+        if not published_posts:
             raise CommandError(
                 "Cannot create comments: there are no published posts. Use --posts N."
             )
 
         comments = [
             Comment(
-                post_id=random.choice(post_ids),
+                post=random.choice(published_posts),
                 author_id=random.choice(author_ids),
                 body=" ".join(
                     self.fake.sentences(
@@ -301,4 +340,11 @@ class Command(BaseCommand):
             for _ in range(count)
         ]
         Comment.objects.bulk_create(comments, batch_size=BATCH_SIZE)
+
+        now = timezone.now()
+        for comment in comments:
+            comment.created_at = self._random_datetime_between(
+                comment.post.created_at, now
+            )
+        Comment.objects.bulk_update(comments, ["created_at"], batch_size=BATCH_SIZE)
         return len(comments)

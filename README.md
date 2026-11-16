@@ -57,6 +57,9 @@ users, categories, tags, posts and comments.
 - 8 categories and 20 tags with real names; existing ones are skipped.
 - ~70% of posts are published, ~30% drafts; ~10% have no category; 0–5 tags each.
 - Comments are added only to published posts.
+- Posts get a random `created_at` in the last 365 days; ~30% of them have
+  `updated_at` 1–30 days later, the rest have `updated_at == created_at`.
+- Every comment is created between its post's `created_at` and now.
 - Safe to run several times in a row.
 
 Example:
@@ -72,6 +75,38 @@ Done in 2.41 seconds
 
 $ python manage.py seed --clear      # start over
 ```
+
+## Queries
+
+50 Django ORM queries live in `apps/blog/queries.py` (one function per query,
+the `QUERIES` dict maps a number to a function). The `queries` command runs them
+and shows how many SQL queries each one made.
+
+```bash
+python manage.py queries                    # all queries except 40–44 (they change data)
+python manage.py queries --number 31        # only query 31 (works for 40–44 too)
+python manage.py queries --number 6 --sql   # also print the SQL
+```
+
+Example:
+
+```
+$ python manage.py queries --number 31
+#31 categories_with_post_count — 1 SQL query
+  Django {'post_count': 27}
+  Python {'post_count': 26}
+  Databases {'post_count': 24}
+  Security {'post_count': 23}
+  DevOps {'post_count': 22}
+  (8 rows)
+
+$ python manage.py queries --number 6 --sql
+#6 has_drafts — 1 SQL query
+SELECT 1 AS "a" FROM "blog_post" WHERE "blog_post"."status" = 'draft' LIMIT 1
+  True
+```
+
+Queries 40–44 change the data. Run `python manage.py seed --clear` to get fresh data.
 
 ## Admin
 
